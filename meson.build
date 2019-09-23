@@ -42,7 +42,7 @@ pre_args = [
   '-D__STDC_FORMAT_MACROS',
   '-D__STDC_LIMIT_MACROS',
   '-DPACKAGE_VERSION="@0@"'.format(meson.project_version()),
-  '-DPACKAGE_BUGREPORT="https://bugs.freedesktop.org/enter_bug.cgi?product=Mesa"',
+  '-DPACKAGE_BUGREPORT="https://gitlab.freedesktop.org/mesa/mesa/issues"',
 ]
 
 with_vulkan_icd_dir = get_option('vulkan-icd-dir')
@@ -712,6 +712,16 @@ if _opencl != 'disabled'
   with_gallium_opencl = true
   with_opencl_icd = _opencl == 'icd'
 
+  with_opencl_spirv = get_option('opencl-spirv')
+  if with_opencl_spirv
+    dep_spirv_tools = dependency('SPIRV-Tools', required : true, version : '>= 2018.0')
+    # LLVMSPIRVLib is available at https://github.com/KhronosGroup/SPIRV-LLVM-Translator
+    dep_llvmspirvlib = dependency('LLVMSPIRVLib', required : true, version : '>= 0.2.1')
+  else
+    dep_spirv_tools = null_dep
+    dep_llvmspirvlib = null_dep
+  endif
+
   if host_machine.cpu_family().startswith('ppc') and cpp.compiles('''
       #if !defined(__VEC__) || !defined(__ALTIVEC__)
       #error "AltiVec not enabled"
@@ -721,8 +731,11 @@ if _opencl != 'disabled'
   endif
 else
   dep_clc = null_dep
+  dep_spirv_tools = null_dep
+  dep_llvmspirvlib = null_dep
   with_gallium_opencl = false
   with_opencl_icd = false
+  with_opencl_spirv = false
 endif
 
 gl_pkgconfig_c_flags = []
@@ -1254,6 +1267,8 @@ if with_gallium_opencl
     'all-targets', 'linker', 'coverage', 'instrumentation', 'ipo', 'irreader',
     'lto', 'option', 'objcarcopts', 'profiledata',
   ]
+endif
+if with_gallium_opencl or with_gallium_softpipe
   llvm_optional_modules += ['coroutines']
 endif
 
@@ -1261,10 +1276,8 @@ if with_amd_vk or with_gallium_radeonsi
   _llvm_version = '>= 8.0.0'
 elif with_gallium_swr
   _llvm_version = '>= 6.0.0'
-elif with_gallium_opencl or with_gallium_r600
-  _llvm_version = '>= 3.9.0'
 else
-  _llvm_version = '>= 3.3.0'
+  _llvm_version = '>= 3.9.0'
 endif
 
 _shared_llvm = get_option('shared-llvm')

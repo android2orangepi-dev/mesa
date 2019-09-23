@@ -23,6 +23,7 @@
  *
  */
 
+#include "pan_bo.h"
 #include "pan_context.h"
 
 /* See mali_job for notes on how this works. But basically, for small vertex
@@ -341,7 +342,7 @@ panfrost_emit_vertex_data(struct panfrost_batch *batch)
         /* Upload whatever we emitted and go */
 
         ctx->payloads[PIPE_SHADER_VERTEX].postfix.attributes =
-                panfrost_upload_transient(ctx, attrs, k * sizeof(union mali_attr));
+                panfrost_upload_transient(batch, attrs, k * sizeof(union mali_attr));
 }
 
 

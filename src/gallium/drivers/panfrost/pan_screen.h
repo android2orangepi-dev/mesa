@@ -47,26 +47,6 @@ struct panfrost_screen;
 /* Driver limits */
 #define PAN_MAX_CONST_BUFFERS 16
 
-/* Flags for allocated memory */
-
-/* This memory region is executable */
-#define PAN_ALLOCATE_EXECUTE            (1 << 0)
-
-/* This memory region should be lazily allocated and grow-on-page-fault. Must
- * be used in conjunction with INVISIBLE */
-#define PAN_ALLOCATE_GROWABLE           (1 << 1)
-
-/* This memory region should not be mapped to the CPU */
-#define PAN_ALLOCATE_INVISIBLE          (1 << 2)
-
-/* This memory region will be used for varyings and needs to have the cache
- * bits twiddled accordingly */
-#define PAN_ALLOCATE_COHERENT_LOCAL     (1 << 3)
-
-/* This region may not be used immediately and will not mmap on allocate
- * (semantically distinct from INVISIBLE, which cannot never be mmaped) */
-#define PAN_ALLOCATE_DELAY_MMAP         (1 << 4)
-
 /* Transient slab size. This is a balance between fragmentation against cache
  * locality and ease of bookkeeping */
 
@@ -120,47 +100,7 @@ pan_screen(struct pipe_screen *p)
         return (struct panfrost_screen *)p;
 }
 
-struct panfrost_bo *
-panfrost_drm_create_bo(struct panfrost_screen *screen, size_t size,
-                       uint32_t flags);
-void
-panfrost_drm_mmap_bo(struct panfrost_screen *screen, struct panfrost_bo *bo);
-void
-panfrost_drm_release_bo(struct panfrost_screen *screen, struct panfrost_bo *bo, bool cacheable);
-struct panfrost_bo *
-panfrost_drm_import_bo(struct panfrost_screen *screen, int fd);
-int
-panfrost_drm_export_bo(struct panfrost_screen *screen, const struct panfrost_bo *bo);
-int
-panfrost_drm_submit_vs_fs_batch(struct panfrost_batch *batch, bool has_draws);
-void
-panfrost_drm_force_flush_fragment(struct panfrost_context *ctx,
-                                  struct pipe_fence_handle **fence);
-unsigned
-panfrost_drm_query_gpu_version(struct panfrost_screen *screen);
-int
-panfrost_drm_init_context(struct panfrost_context *ctx);
-void
-panfrost_drm_fence_reference(struct pipe_screen *screen,
-                             struct pipe_fence_handle **ptr,
-                             struct pipe_fence_handle *fence);
-boolean
-panfrost_drm_fence_finish(struct pipe_screen *pscreen,
-                          struct pipe_context *ctx,
-                          struct pipe_fence_handle *fence,
-                          uint64_t timeout);
-struct panfrost_bo *
-panfrost_bo_cache_fetch(
-                struct panfrost_screen *screen,
-                size_t size, uint32_t flags);
-
-bool
-panfrost_bo_cache_put(
-                struct panfrost_screen *screen,
-                struct panfrost_bo *bo);
-
-void
-panfrost_bo_cache_evict_all(
-                struct panfrost_screen *screen);
+struct panfrost_fence *
+panfrost_fence_create(struct panfrost_context *ctx);
 
 #endif /* PAN_SCREEN_H */

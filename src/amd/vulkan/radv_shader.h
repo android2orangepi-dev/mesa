@@ -126,6 +126,7 @@ struct radv_nir_compiler_options {
 	bool record_llvm_ir;
 	bool check_ir;
 	bool has_ls_vgpr_init_bug;
+	bool use_ngg_streamout;
 	enum radeon_family family;
 	enum chip_class chip_class;
 	uint32_t tess_offchip_block_dw_size;
@@ -252,6 +253,7 @@ struct radv_shader_info {
 		uint8_t num_stream_output_components[4];
 		uint8_t output_streams[VARYING_SLOT_VAR31 + 1];
 		uint8_t max_stream;
+		bool writes_memory;
 		unsigned gsvs_vertex_size;
 		unsigned max_gsvs_emit_size;
 		unsigned vertices_in;
@@ -331,6 +333,7 @@ struct radv_shader_binary_legacy {
 	struct radv_shader_binary base;
 	struct ac_shader_config config;
 	unsigned code_size;
+	unsigned exec_size;
 	unsigned llvm_ir_size;
 	unsigned disasm_size;
 	
@@ -388,7 +391,8 @@ radv_shader_compile_to_nir(struct radv_device *device,
 			   gl_shader_stage stage,
 			   const VkSpecializationInfo *spec_info,
 			   const VkPipelineCreateFlags flags,
-			   const struct radv_pipeline_layout *layout);
+			   const struct radv_pipeline_layout *layout,
+			   bool use_aco);
 
 void *
 radv_alloc_shader_memory(struct radv_device *device,
@@ -410,6 +414,7 @@ radv_shader_variant_compile(struct radv_device *device,
 			    const struct radv_shader_variant_key *key,
 			    struct radv_shader_info *info,
 			    bool keep_shader_info,
+			    bool use_aco,
 			    struct radv_shader_binary **binary_out);
 
 struct radv_shader_variant *

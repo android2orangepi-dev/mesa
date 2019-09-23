@@ -22,6 +22,7 @@
  *
  */
 
+#include "pan_bo.h"
 #include "pan_context.h"
 #include "pan_util.h"
 #include "pan_format.h"
@@ -345,8 +346,7 @@ panfrost_mfbd_set_zsbuf(
 }
 
 static mali_ptr
-panfrost_mfbd_upload(
-        struct panfrost_context *ctx,
+panfrost_mfbd_upload(struct panfrost_batch *batch,
         struct bifrost_framebuffer *fb,
         struct bifrost_fb_extra *fbx,
         struct bifrost_render_target *rts,
@@ -365,7 +365,7 @@ panfrost_mfbd_upload(
                 sizeof(struct bifrost_render_target) * 4;
 
         struct panfrost_transfer m_f_trans =
-                panfrost_allocate_transient(ctx, total_sz);
+                panfrost_allocate_transient(batch, total_sz);
 
         /* Do the transfer */
 
@@ -392,18 +392,15 @@ panfrost_mfbd_upload(
 /* Creates an MFBD for the FRAGMENT section of the bound framebuffer */
 
 mali_ptr
-panfrost_mfbd_fragment(struct panfrost_context *ctx, bool has_draws)
+panfrost_mfbd_fragment(struct panfrost_batch *batch, bool has_draws)
 {
-        struct panfrost_batch *batch = panfrost_get_batch_for_fbo(ctx);
-
-        struct bifrost_framebuffer fb = panfrost_emit_mfbd(ctx, has_draws);
+        struct bifrost_framebuffer fb = panfrost_emit_mfbd(batch, has_draws);
         struct bifrost_fb_extra fbx = {};
         struct bifrost_render_target rts[4] = {};
 
         /* We always upload at least one dummy GL_NONE render target */
 
-        unsigned rt_descriptors =
-                MAX2(ctx->pipe_framebuffer.nr_cbufs, 1);
+        unsigned rt_descriptors = MAX2(batch->key.nr_cbufs, 1);
 
         fb.rt_count_1 = MALI_POSITIVE(rt_descriptors);
         fb.rt_count_2 = rt_descriptors;
@@ -416,7 +413,7 @@ panfrost_mfbd_fragment(struct panfrost_context *ctx, bool has_draws)
         /* Upload either the render target or a dummy GL_NONE target */
 
         for (int cb = 0; cb < rt_descriptors; ++cb) {
-                struct pipe_surface *surf = ctx->pipe_framebuffer.cbufs[cb];
+                struct pipe_surface *surf = batch->key.cbufs[cb];
 
                 if (surf) {
                         panfrost_mfbd_set_cbuf(&rts[cb], surf);
@@ -442,8 +439,8 @@ panfrost_mfbd_fragment(struct panfrost_context *ctx, bool has_draws)
                 rts[cb].format.unk1 |= (cb * 0x400);
         }
 
-        if (ctx->pipe_framebuffer.zsbuf) {
-                panfrost_mfbd_set_zsbuf(&fb, &fbx, ctx->pipe_framebuffer.zsbuf);
+        if (batch->key.zsbuf) {
+                panfrost_mfbd_set_zsbuf(&fb, &fbx, batch->key.zsbuf);
         }
 
         /* When scanning out, the depth buffer is immediately invalidated, so
@@ -454,9 +451,8 @@ panfrost_mfbd_fragment(struct panfrost_context *ctx, bool has_draws)
          * The exception is ReadPixels, but this is not supported on GLES so we
          * can safely ignore it. */
 
-        if (panfrost_is_scanout(ctx)) {
+        if (panfrost_batch_is_scanout(batch))
                 batch->requirements &= ~PAN_REQ_DEPTH_WRITE;
-        }
 
         /* Actualize the requirements */
 
@@ -473,8 +469,8 @@ panfrost_mfbd_fragment(struct panfrost_context *ctx, bool has_draws)
 
         /* Checksumming only works with a single render target */
 
-        if (ctx->pipe_framebuffer.nr_cbufs == 1) {
-                struct pipe_surface *surf = ctx->pipe_framebuffer.cbufs[0];
+        if (batch->key.nr_cbufs == 1) {
+                struct pipe_surface *surf = batch->key.cbufs[0];
                 struct panfrost_resource *rsrc = pan_resource(surf->texture);
                 struct panfrost_bo *bo = rsrc->bo;
 
@@ -489,5 +485,5 @@ panfrost_mfbd_fragment(struct panfrost_context *ctx, bool has_draws)
                 }
         }
 
-        return panfrost_mfbd_upload(ctx, &fb, &fbx, rts, rt_descriptors);
+        return panfrost_mfbd_upload(batch, &fb, &fbx, rts, rt_descriptors);
 }

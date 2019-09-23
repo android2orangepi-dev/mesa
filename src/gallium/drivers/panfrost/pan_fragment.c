@@ -42,28 +42,24 @@ panfrost_initialize_surface(
         struct panfrost_resource *rsrc = pan_resource(surf->texture);
 
         rsrc->slices[level].initialized = true;
-
-        assert(rsrc->bo);
-        panfrost_batch_add_bo(batch, rsrc->bo);
 }
 
 /* Generate a fragment job. This should be called once per frame. (According to
  * presentations, this is supposed to correspond to eglSwapBuffers) */
 
 mali_ptr
-panfrost_fragment_job(struct panfrost_context *ctx, bool has_draws)
+panfrost_fragment_job(struct panfrost_batch *batch, bool has_draws)
 {
-        struct panfrost_screen *screen = pan_screen(ctx->base.screen);
+        struct panfrost_screen *screen = pan_screen(batch->ctx->base.screen);
 
         mali_ptr framebuffer = screen->require_sfbd ?
-                               panfrost_sfbd_fragment(ctx, has_draws) :
-                               panfrost_mfbd_fragment(ctx, has_draws);
+                               panfrost_sfbd_fragment(batch, has_draws) :
+                               panfrost_mfbd_fragment(batch, has_draws);
 
         /* Mark the affected buffers as initialized, since we're writing to it.
          * Also, add the surfaces we're writing to to the batch */
 
-        struct pipe_framebuffer_state *fb = &ctx->pipe_framebuffer;
-        struct panfrost_batch *batch = panfrost_get_batch_for_fbo(ctx);
+        struct pipe_framebuffer_state *fb = &batch->key;
 
         for (unsigned i = 0; i < fb->nr_cbufs; ++i) {
                 panfrost_initialize_surface(batch, fb->cbufs[i]);
@@ -108,7 +104,7 @@ panfrost_fragment_job(struct panfrost_context *ctx, bool has_draws)
          * shared with 64-bit Bifrost systems, and accordingly there is 4-bytes
          * of zero padding in between. */
 
-        struct panfrost_transfer transfer = panfrost_allocate_transient(ctx, sizeof(header) + sizeof(payload));
+        struct panfrost_transfer transfer = panfrost_allocate_transient(batch, sizeof(header) + sizeof(payload));
         memcpy(transfer.cpu, &header, sizeof(header));
         memcpy(transfer.cpu + sizeof(header), &payload, sizeof(payload));
         return transfer.gpu;

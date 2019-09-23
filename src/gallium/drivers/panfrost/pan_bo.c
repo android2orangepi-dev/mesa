@@ -23,11 +23,20 @@
  * Authors (Collabora):
  *   Alyssa Rosenzweig <alyssa.rosenzweig@collabora.com>
  */
+#include <stdio.h>
+#include <fcntl.h>
 #include <xf86drm.h>
 #include <pthread.h>
 #include "drm-uapi/panfrost_drm.h"
 
+#include "pan_bo.h"
 #include "pan_screen.h"
+#include "pan_util.h"
+#include "pandecode/decode.h"
+
+#include "os/os_mman.h"
+
+#include "util/u_inlines.h"
 #include "util/u_math.h"
 
 /* This file implements a userspace BO cache. Allocating and freeing
@@ -44,6 +53,53 @@
  * the cache, since that's what helpful in practice and avoids extra logic
  * around the linked list.
  */
+
+static struct panfrost_bo *
+panfrost_bo_alloc(struct panfrost_screen *screen, size_t size,
+                  uint32_t flags)
+{
+        struct drm_panfrost_create_bo create_bo = { .size = size };
+        struct panfrost_bo *bo;
+        int ret;
+
+        if (screen->kernel_version->version_major > 1 ||
+            screen->kernel_version->version_minor >= 1) {
+                if (flags & PAN_BO_GROWABLE)
+                        create_bo.flags |= PANFROST_BO_HEAP;
+                if (!(flags & PAN_BO_EXECUTE))
+                        create_bo.flags |= PANFROST_BO_NOEXEC;
+        }
+
+        ret = drmIoctl(screen->fd, DRM_IOCTL_PANFROST_CREATE_BO, &create_bo);
+        if (ret) {
+                fprintf(stderr, "DRM_IOCTL_PANFROST_CREATE_BO failed: %m\n");
+                return NULL;
+        }
+
+        bo = rzalloc(screen, struct panfrost_bo);
+        assert(bo);
+        bo->size = create_bo.size;
+        bo->gpu = create_bo.offset;
+        bo->gem_handle = create_bo.handle;
+        bo->flags = flags;
+        bo->screen = screen;
+        return bo;
+}
+
+static void
+panfrost_bo_free(struct panfrost_bo *bo)
+{
+        struct drm_gem_close gem_close = { .handle = bo->gem_handle };
+        int ret;
+
+        ret = drmIoctl(bo->screen->fd, DRM_IOCTL_GEM_CLOSE, &gem_close);
+        if (ret) {
+                fprintf(stderr, "DRM_IOCTL_GEM_CLOSE failed: %m\n");
+                assert(0);
+        }
+
+        ralloc_free(bo);
+}
 
 /* Helper to calculate the bucket index of a BO */
 
@@ -80,7 +136,7 @@ pan_bucket(struct panfrost_screen *screen, unsigned size)
  * cache. If it fails, it returns NULL signaling the caller to allocate a new
  * BO. */
 
-struct panfrost_bo *
+static struct panfrost_bo *
 panfrost_bo_cache_fetch(
                 struct panfrost_screen *screen,
                 size_t size, uint32_t flags)
@@ -105,7 +161,7 @@ panfrost_bo_cache_fetch(
 
                         ret = drmIoctl(screen->fd, DRM_IOCTL_PANFROST_MADVISE, &madv);
                         if (!ret && !madv.retained) {
-                                panfrost_drm_release_bo(screen, entry, false);
+                                panfrost_bo_free(entry);
                                 continue;
                         }
                         /* Let's go! */
@@ -121,11 +177,14 @@ panfrost_bo_cache_fetch(
 /* Tries to add a BO to the cache. Returns if it was
  * successful */
 
-bool
-panfrost_bo_cache_put(
-                struct panfrost_screen *screen,
-                struct panfrost_bo *bo)
+static bool
+panfrost_bo_cache_put(struct panfrost_bo *bo)
 {
+        struct panfrost_screen *screen = bo->screen;
+
+        if (bo->flags & PAN_BO_DONT_REUSE)
+                return false;
+
         pthread_mutex_lock(&screen->bo_cache_lock);
         struct list_head *bucket = pan_bucket(screen, bo->size);
         struct drm_panfrost_madvise madv;
@@ -159,9 +218,165 @@ panfrost_bo_cache_evict_all(
 
                 list_for_each_entry_safe(struct panfrost_bo, entry, bucket, link) {
                         list_del(&entry->link);
-                        panfrost_drm_release_bo(screen, entry, false);
+                        panfrost_bo_free(entry);
                 }
         }
         pthread_mutex_unlock(&screen->bo_cache_lock);
+}
+
+void
+panfrost_bo_mmap(struct panfrost_bo *bo)
+{
+        struct drm_panfrost_mmap_bo mmap_bo = { .handle = bo->gem_handle };
+        int ret;
+
+        if (bo->cpu)
+                return;
+
+        ret = drmIoctl(bo->screen->fd, DRM_IOCTL_PANFROST_MMAP_BO, &mmap_bo);
+        if (ret) {
+                fprintf(stderr, "DRM_IOCTL_PANFROST_MMAP_BO failed: %m\n");
+                assert(0);
+        }
+
+        bo->cpu = os_mmap(NULL, bo->size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          bo->screen->fd, mmap_bo.offset);
+        if (bo->cpu == MAP_FAILED) {
+                fprintf(stderr, "mmap failed: %p %m\n", bo->cpu);
+                assert(0);
+        }
+
+        /* Record the mmap if we're tracing */
+        if (pan_debug & PAN_DBG_TRACE)
+                pandecode_inject_mmap(bo->gpu, bo->cpu, bo->size, NULL);
+}
+
+static void
+panfrost_bo_munmap(struct panfrost_bo *bo)
+{
+        if (!bo->cpu)
+                return;
+
+        if (os_munmap((void *) (uintptr_t)bo->cpu, bo->size)) {
+                perror("munmap");
+                abort();
+        }
+
+        bo->cpu = NULL;
+}
+
+struct panfrost_bo *
+panfrost_bo_create(struct panfrost_screen *screen, size_t size,
+                   uint32_t flags)
+{
+        struct panfrost_bo *bo;
+
+        /* Kernel will fail (confusingly) with EPERM otherwise */
+        assert(size > 0);
+
+        /* To maximize BO cache usage, don't allocate tiny BOs */
+        size = MAX2(size, 4096);
+
+        /* GROWABLE BOs cannot be mmapped */
+        if (flags & PAN_BO_GROWABLE)
+                assert(flags & PAN_BO_INVISIBLE);
+
+        /* Before creating a BO, we first want to check the cache, otherwise,
+         * the cache misses and we need to allocate a BO fresh from the kernel
+         */
+        bo = panfrost_bo_cache_fetch(screen, size, flags);
+        if (!bo)
+                bo = panfrost_bo_alloc(screen, size, flags);
+
+        if (!bo)
+                fprintf(stderr, "BO creation failed\n");
+
+        assert(bo);
+
+        /* Only mmap now if we know we need to. For CPU-invisible buffers, we
+         * never map since we don't care about their contents; they're purely
+         * for GPU-internal use. But we do trace them anyway. */
+
+        if (!(flags & (PAN_BO_INVISIBLE | PAN_BO_DELAY_MMAP)))
+                panfrost_bo_mmap(bo);
+        else if (flags & PAN_BO_INVISIBLE) {
+                if (pan_debug & PAN_DBG_TRACE)
+                        pandecode_inject_mmap(bo->gpu, NULL, bo->size, NULL);
+        }
+
+        pipe_reference_init(&bo->reference, 1);
+        return bo;
+}
+
+void
+panfrost_bo_reference(struct panfrost_bo *bo)
+{
+        if (bo)
+                pipe_reference(NULL, &bo->reference);
+}
+
+void
+panfrost_bo_unreference(struct panfrost_bo *bo)
+{
+        if (!bo)
+                return;
+
+        if (!pipe_reference(&bo->reference, NULL))
+                return;
+
+        /* When the reference count goes to zero, we need to cleanup */
+        panfrost_bo_munmap(bo);
+
+        /* Rather than freeing the BO now, we'll cache the BO for later
+         * allocations if we're allowed to.
+         */
+        if (panfrost_bo_cache_put(bo))
+                return;
+
+        panfrost_bo_free(bo);
+}
+
+struct panfrost_bo *
+panfrost_bo_import(struct panfrost_screen *screen, int fd)
+{
+        struct panfrost_bo *bo = rzalloc(screen, struct panfrost_bo);
+        struct drm_panfrost_get_bo_offset get_bo_offset = {0,};
+        ASSERTED int ret;
+        unsigned gem_handle;
+
+        ret = drmPrimeFDToHandle(screen->fd, fd, &gem_handle);
+        assert(!ret);
+
+        get_bo_offset.handle = gem_handle;
+        ret = drmIoctl(screen->fd, DRM_IOCTL_PANFROST_GET_BO_OFFSET, &get_bo_offset);
+        assert(!ret);
+
+        bo->screen = screen;
+        bo->gem_handle = gem_handle;
+        bo->gpu = (mali_ptr) get_bo_offset.offset;
+        bo->size = lseek(fd, 0, SEEK_END);
+        bo->flags |= PAN_BO_DONT_REUSE;
+        assert(bo->size > 0);
+        pipe_reference_init(&bo->reference, 1);
+
+        // TODO map and unmap on demand?
+        panfrost_bo_mmap(bo);
+        return bo;
+}
+
+int
+panfrost_bo_export(struct panfrost_bo *bo)
+{
+        struct drm_prime_handle args = {
+                .handle = bo->gem_handle,
+                .flags = DRM_CLOEXEC,
+        };
+
+        int ret = drmIoctl(bo->screen->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args);
+        if (ret == -1)
+                return -1;
+
+        bo->flags |= PAN_BO_DONT_REUSE;
+        return args.fd;
 }
 

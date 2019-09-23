@@ -310,6 +310,8 @@ gather_intrinsic_info(const nir_shader *nir, const nir_intrinsic_instr *instr,
 		    instr->intrinsic == nir_intrinsic_image_deref_atomic_comp_swap) {
 			if (nir->info.stage == MESA_SHADER_FRAGMENT)
 				info->ps.writes_memory = true;
+			else if (nir->info.stage == MESA_SHADER_GEOMETRY)
+				info->gs.writes_memory = true;
 		}
 		break;
 	}
@@ -326,6 +328,8 @@ gather_intrinsic_info(const nir_shader *nir, const nir_intrinsic_instr *instr,
 	case nir_intrinsic_ssbo_atomic_comp_swap:
 		if (nir->info.stage == MESA_SHADER_FRAGMENT)
 			info->ps.writes_memory = true;
+		else if (nir->info.stage == MESA_SHADER_GEOMETRY)
+			info->gs.writes_memory = true;
 		break;
 	case nir_intrinsic_load_deref:
 		gather_intrinsic_load_deref_info(nir, instr, info);
@@ -546,6 +550,8 @@ gather_info_output_decl(const nir_shader *nir, const nir_variable *var,
 
 		if (key->vs_common_out.as_ls)
 			gather_info_output_decl_ls(nir, var, info);
+		else if (key->vs_common_out.as_ngg)
+			gather_info_output_decl_gs(nir, var, info);
 		break;
 	case MESA_SHADER_GEOMETRY:
 		vs_info = &info->vs.outinfo;

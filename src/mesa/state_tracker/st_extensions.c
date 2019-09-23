@@ -132,11 +132,8 @@ void st_init_limits(struct pipe_screen *screen,
    c->MaxPointSizeAA =
       _maxf(1.0f, screen->get_paramf(screen, PIPE_CAPF_MAX_POINT_WIDTH_AA));
 
-   /* these are not queryable. Note that GL basically mandates a 1.0 minimum
-    * for non-aa sizes, but we can go down to 0.0 for aa points.
-    */
    c->MinPointSize = 1.0f;
-   c->MinPointSizeAA = 0.0f;
+   c->MinPointSizeAA = 1.0f;
 
    c->MaxTextureMaxAnisotropy =
       _maxf(2.0f,
@@ -707,6 +704,7 @@ void st_init_extensions(struct pipe_screen *screen,
       { o(ARB_draw_buffers_blend),           PIPE_CAP_INDEP_BLEND_FUNC                 },
       { o(ARB_draw_indirect),                PIPE_CAP_DRAW_INDIRECT                    },
       { o(ARB_draw_instanced),               PIPE_CAP_TGSI_INSTANCEID                  },
+      { o(ARB_fragment_program_shadow),      PIPE_CAP_TEXTURE_SHADOW_MAP               },
       { o(ARB_framebuffer_object),           PIPE_CAP_MIXED_FRAMEBUFFER_SIZES          },
       { o(ARB_gpu_shader_int64),             PIPE_CAP_INT64                            },
       { o(ARB_gl_spirv),                     PIPE_CAP_GL_SPIRV                         },
@@ -733,6 +731,7 @@ void st_init_extensions(struct pipe_screen *screen,
       { o(ARB_shader_stencil_export),        PIPE_CAP_SHADER_STENCIL_EXPORT            },
       { o(ARB_shader_texture_image_samples), PIPE_CAP_TGSI_TXQS                        },
       { o(ARB_shader_texture_lod),           PIPE_CAP_FRAGMENT_SHADER_TEXTURE_LOD      },
+      { o(ARB_shadow),                       PIPE_CAP_TEXTURE_SHADOW_MAP               },
       { o(ARB_sparse_buffer),                PIPE_CAP_SPARSE_BUFFER_PAGE_SIZE          },
       { o(ARB_spirv_extensions),             PIPE_CAP_GL_SPIRV                         },
       { o(ARB_texture_buffer_object),        PIPE_CAP_TEXTURE_BUFFER_OBJECTS           },
@@ -997,13 +996,11 @@ void st_init_extensions(struct pipe_screen *screen,
    extensions->ARB_explicit_uniform_location = GL_TRUE;
    extensions->ARB_fragment_coord_conventions = GL_TRUE;
    extensions->ARB_fragment_program = GL_TRUE;
-   extensions->ARB_fragment_program_shadow = GL_TRUE;
    extensions->ARB_fragment_shader = GL_TRUE;
    extensions->ARB_half_float_vertex = GL_TRUE;
    extensions->ARB_internalformat_query = GL_TRUE;
    extensions->ARB_internalformat_query2 = GL_TRUE;
    extensions->ARB_map_buffer_range = GL_TRUE;
-   extensions->ARB_shadow = GL_TRUE;
    extensions->ARB_sync = GL_TRUE;
    extensions->ARB_texture_border_clamp = GL_TRUE;
    extensions->ARB_texture_cube_map = GL_TRUE;
@@ -1448,7 +1445,6 @@ void st_init_extensions(struct pipe_screen *screen,
     */
    if (GLSLVersion >= 130 &&
        extensions->ARB_uniform_buffer_object &&
-       extensions->ARB_shader_bit_encoding &&
        extensions->NV_primitive_restart &&
        screen->get_shader_param(screen, PIPE_SHADER_VERTEX,
                                 PIPE_SHADER_CAP_MAX_TEXTURE_SAMPLERS) >= 16 &&

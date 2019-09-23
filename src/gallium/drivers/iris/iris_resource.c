@@ -1025,9 +1025,12 @@ iris_flush_resource(struct pipe_context *ctx, struct pipe_resource *resource)
 
 static bool
 iris_resource_get_param(struct pipe_screen *screen,
+                        struct pipe_context *context,
                         struct pipe_resource *resource,
-                        unsigned int plane,
+                        unsigned plane,
+                        unsigned layer,
                         enum pipe_resource_param param,
+                        unsigned handle_usage,
                         uint64_t *value)
 {
    struct iris_resource *res = (struct iris_resource *)resource;
@@ -1891,13 +1894,7 @@ iris_dirty_for_history(struct iris_context *ice,
    uint64_t dirty = 0ull;
 
    if (res->bind_history & PIPE_BIND_CONSTANT_BUFFER) {
-      dirty |= IRIS_DIRTY_CONSTANTS_VS |
-               IRIS_DIRTY_CONSTANTS_TCS |
-               IRIS_DIRTY_CONSTANTS_TES |
-               IRIS_DIRTY_CONSTANTS_GS |
-               IRIS_DIRTY_CONSTANTS_FS |
-               IRIS_DIRTY_CONSTANTS_CS |
-               IRIS_ALL_DIRTY_BINDINGS;
+      dirty |= ((uint64_t)res->bind_stages) << IRIS_SHIFT_FOR_DIRTY_CONSTANTS;
    }
 
    ice->state.dirty |= dirty;

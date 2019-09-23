@@ -31,13 +31,6 @@
 #include "pan_allocate.h"
 #include "pan_resource.h"
 
-/* Used as a hash table key */
-
-struct panfrost_batch_key {
-        struct pipe_surface *cbufs[4];
-        struct pipe_surface *zsbuf;
-};
-
 #define PAN_REQ_MSAA            (1 << 0)
 #define PAN_REQ_DEPTH_WRITE     (1 << 1)
 
@@ -46,7 +39,7 @@ struct panfrost_batch_key {
 
 struct panfrost_batch {
         struct panfrost_context *ctx;
-        struct panfrost_batch_key key;
+        struct pipe_framebuffer_state key;
 
         /* Buffers cleared (PIPE_CLEAR_* bitmask) */
         unsigned clear;
@@ -115,20 +108,21 @@ struct panfrost_batch {
 
         /* Polygon list bound to the batch, or NULL if none bound yet */
         struct panfrost_bo *polygon_list;
+
+        /* Scratchpath BO bound to the batch, or NULL if none bound yet */
+        struct panfrost_bo *scratchpad;
+
+        /* Tiler heap BO bound to the batch, or NULL if none bound yet */
+        struct panfrost_bo *tiler_heap;
+
+        /* Dummy tiler BO bound to the batch, or NULL if none bound yet */
+        struct panfrost_bo *tiler_dummy;
+
+        /* Framebuffer descriptor. */
+        mali_ptr framebuffer;
 };
 
 /* Functions for managing the above */
-
-struct panfrost_batch *
-panfrost_create_batch(struct panfrost_context *ctx);
-
-void
-panfrost_free_batch(struct panfrost_batch *batch);
-
-struct panfrost_batch *
-panfrost_get_batch(struct panfrost_context *ctx,
-                   struct pipe_surface **cbufs,
-                   struct pipe_surface *zsbuf);
 
 struct panfrost_batch *
 panfrost_get_batch_for_fbo(struct panfrost_context *ctx);
@@ -139,13 +133,11 @@ panfrost_batch_init(struct panfrost_context *ctx);
 void
 panfrost_batch_add_bo(struct panfrost_batch *batch, struct panfrost_bo *bo);
 
-void
-panfrost_flush_jobs_writing_resource(struct panfrost_context *panfrost,
-                                     struct pipe_resource *prsc);
+void panfrost_batch_add_fbo_bos(struct panfrost_batch *batch);
 
-void
-panfrost_flush_jobs_reading_resource(struct panfrost_context *panfrost,
-                                     struct pipe_resource *prsc);
+struct panfrost_bo *
+panfrost_batch_create_bo(struct panfrost_batch *batch, size_t size,
+                         uint32_t create_flags);
 
 void
 panfrost_batch_submit(struct panfrost_batch *batch);
@@ -155,6 +147,15 @@ panfrost_batch_set_requirements(struct panfrost_batch *batch);
 
 mali_ptr
 panfrost_batch_get_polygon_list(struct panfrost_batch *batch, unsigned size);
+
+struct panfrost_bo *
+panfrost_batch_get_scratchpad(struct panfrost_batch *batch);
+
+struct panfrost_bo *
+panfrost_batch_get_tiler_heap(struct panfrost_batch *batch);
+
+struct panfrost_bo *
+panfrost_batch_get_tiler_dummy(struct panfrost_batch *batch);
 
 void
 panfrost_batch_clear(struct panfrost_batch *batch,
@@ -203,5 +204,8 @@ panfrost_scoreboard_queue_fused_job_prepend(
 
 void
 panfrost_scoreboard_link_batch(struct panfrost_batch *batch);
+
+bool
+panfrost_batch_is_scanout(struct panfrost_batch *batch);
 
 #endif

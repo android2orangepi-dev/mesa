@@ -114,9 +114,6 @@ struct panfrost_context {
         struct panfrost_batch *batch;
         struct hash_table *batches;
 
-        /* panfrost_resource -> panfrost_job */
-        struct hash_table *write_jobs;
-
         /* Within a launch_grid call.. */
         const struct pipe_grid_info *compute_grid;
 
@@ -125,10 +122,6 @@ struct panfrost_context {
 
         struct pipe_framebuffer_state pipe_framebuffer;
         struct panfrost_streamout streamout;
-
-        struct panfrost_bo *scratchpad;
-        struct panfrost_bo *tiler_heap;
-        struct panfrost_bo *tiler_dummy;
 
         bool active_queries;
         uint64_t prims_generated;
@@ -199,12 +192,6 @@ struct panfrost_context {
         bool is_t6xx;
 
         uint32_t out_sync;
-
-        /* While we're busy building up the job for frame N, the GPU is
-         * still busy executing frame N-1. So hold a reference to
-         * yesterjob */
-        int last_fragment_flushed;
-        struct panfrost_batch *last_batch;
 };
 
 /* Corresponds to the CSO */
@@ -304,6 +291,9 @@ struct pipe_context *
 panfrost_create_context(struct pipe_screen *screen, void *priv, unsigned flags);
 
 void
+panfrost_invalidate_frame(struct panfrost_context *ctx);
+
+void
 panfrost_emit_for_draw(struct panfrost_context *ctx, bool with_vertex_data);
 
 struct panfrost_transfer
@@ -318,20 +308,17 @@ panfrost_flush(
         struct pipe_fence_handle **fence,
         unsigned flags);
 
-bool
-panfrost_is_scanout(struct panfrost_context *ctx);
-
-mali_ptr panfrost_sfbd_fragment(struct panfrost_context *ctx, bool has_draws);
-mali_ptr panfrost_mfbd_fragment(struct panfrost_context *ctx, bool has_draws);
+mali_ptr panfrost_sfbd_fragment(struct panfrost_batch *batch, bool has_draws);
+mali_ptr panfrost_mfbd_fragment(struct panfrost_batch *batch, bool has_draws);
 
 struct bifrost_framebuffer
-panfrost_emit_mfbd(struct panfrost_context *ctx, unsigned vertex_count);
+panfrost_emit_mfbd(struct panfrost_batch *batch, unsigned vertex_count);
 
 struct mali_single_framebuffer
-panfrost_emit_sfbd(struct panfrost_context *ctx, unsigned vertex_count);
+panfrost_emit_sfbd(struct panfrost_batch *batch, unsigned vertex_count);
 
 mali_ptr
-panfrost_fragment_job(struct panfrost_context *ctx, bool has_draws);
+panfrost_fragment_job(struct panfrost_batch *batch, bool has_draws);
 
 void
 panfrost_shader_compile(

@@ -66,6 +66,8 @@ struct radeon_info {
 	bool                        has_load_ctx_reg_pkt;
 	bool                        has_out_of_order_rast;
 	bool                        cpdma_prefetch_writes_memory;
+	uint32_t                    pbb_max_alloc_count;
+	uint32_t                    num_sdp_interfaces;
 
 	/* There are 2 display DCC codepaths, because display expects unaligned DCC. */
 	/* Disable RB and pipe alignment to skip the retile blit. (1 RB chips only) */
@@ -139,6 +141,9 @@ struct radeon_info {
 	uint32_t                    num_tcc_blocks;
 	uint32_t                    max_se; /* shader engines */
 	uint32_t                    max_sh_per_se; /* shader arrays per shader engine */
+	uint32_t                    max_wave64_per_simd;
+	uint32_t                    num_physical_sgprs_per_simd;
+	uint32_t                    num_physical_wave64_vgprs_per_simd;
 
 	/* Render backends (color + depth blocks). */
 	uint32_t                    r300_num_gb_pipes;
@@ -186,43 +191,6 @@ unsigned ac_get_compute_resource_limits(struct radeon_info *info,
 					unsigned waves_per_threadgroup,
 					unsigned max_waves_per_sh,
 					unsigned threadgroups_per_cu);
-
-static inline unsigned ac_get_max_wave64_per_simd(enum radeon_family family)
-{
-
-	switch (family) {
-	/* These always have 8 waves: */
-	case CHIP_POLARIS10:
-	case CHIP_POLARIS11:
-	case CHIP_POLARIS12:
-	case CHIP_VEGAM:
-		return 8;
-	default:
-		return 10;
-	}
-}
-
-static inline unsigned ac_get_num_physical_vgprs(enum chip_class chip_class,
-						 unsigned wave_size)
-{
-	/* The number is per SIMD. */
-	if (chip_class >= GFX10)
-		return wave_size == 32 ? 1024 : 512;
-	else
-		return 256;
-}
-
-static inline uint32_t
-ac_get_num_physical_sgprs(const struct radeon_info *info)
-{
-	/* The number is per SIMD. There is enough SGPRs for the maximum number
-	 * of Wave32, which is double the number for Wave64.
-	 */
-	if (info->chip_class >= GFX10)
-		return 128 * ac_get_max_wave64_per_simd(info->family) * 2;
-
-	return info->chip_class >= GFX8 ? 800 : 512;
-}
 
 #ifdef __cplusplus
 }

@@ -29,6 +29,7 @@
 #include <assert.h>
 #include <panfrost-misc.h>
 #include <panfrost-job.h>
+#include "pan_bo.h"
 #include "pan_context.h"
 
 /* TODO: What does this actually have to be? */
@@ -39,11 +40,8 @@
  * into the pool and copy there */
 
 struct panfrost_transfer
-panfrost_allocate_transient(struct panfrost_context *ctx, size_t sz)
+panfrost_allocate_transient(struct panfrost_batch *batch, size_t sz)
 {
-        struct panfrost_screen *screen = pan_screen(ctx->base.screen);
-        struct panfrost_batch *batch = panfrost_get_batch_for_fbo(ctx);
-
         /* Pad the size */
         sz = ALIGN_POT(sz, ALIGNMENT);
 
@@ -66,12 +64,7 @@ panfrost_allocate_transient(struct panfrost_context *ctx, size_t sz)
                                TRANSIENT_SLAB_SIZE : ALIGN_POT(sz, 4096);
 
                 /* We can't reuse the current BO, but we can create a new one. */
-                bo = panfrost_drm_create_bo(screen, bo_sz, 0);
-                panfrost_batch_add_bo(batch, bo);
-
-                /* Creating a BO adds a reference, and then the job adds a
-                 * second one. So we need to pop back one reference */
-                panfrost_bo_unreference(&screen->base, bo);
+                bo = panfrost_batch_create_bo(batch, bo_sz, 0);
 
                 if (sz < TRANSIENT_SLAB_SIZE) {
                         batch->transient_bo = bo;
@@ -89,9 +82,10 @@ panfrost_allocate_transient(struct panfrost_context *ctx, size_t sz)
 }
 
 mali_ptr
-panfrost_upload_transient(struct panfrost_context *ctx, const void *data, size_t sz)
+panfrost_upload_transient(struct panfrost_batch *batch, const void *data,
+                          size_t sz)
 {
-        struct panfrost_transfer transfer = panfrost_allocate_transient(ctx, sz);
+        struct panfrost_transfer transfer = panfrost_allocate_transient(batch, sz);
         memcpy(transfer.cpu, data, sz);
         return transfer.gpu;
 }
